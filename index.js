@@ -1,11 +1,12 @@
 const { Client, Intents } = require("discord.js");
-var fs = require('fs');
+const fs = require('fs');
+const brain = require("brain.js")
 require('dotenv').config()
 
 const botToken = process.env.BOT_TOKEN
 const channelID = process.env.CHANNEL_ID
 const fileName = "myjsonfile.json"
-
+var redeTreinada;
 
 const client = new Client({ intents: [Intents.FLAGS.GUILDS] });
 client.login(botToken);
@@ -14,64 +15,44 @@ client.login(botToken);
 client.once('ready', async () =>
 {
 	console.log('Ready!');
-	var allMessages = await GetAllMessagesAsync(client.channels.cache.get(channelID))
-	SaveToJson(JSON.stringify(allMessages))
-	console.log(await ReadJson())
+	var allMessages = await Mensagem.GetAllMessagesOfAChannelAsync(client.channels.cache.get(channelID))
+	console.log(allMessages)
+	BrainJs.trainML(allMessages)
 });
 
-async function ReadJson()
-{
-	let rawdata = fs.readFileSync(fileName);
-	var parsed = await JSON.parse(rawdata)
-	return parsed;
-}
 
-async function SaveToJson(json)
-{
-	fs.writeFile(fileName, json, 'utf8', (error) =>
+class BrainJs{
+
+	static GetBrainJsConfig()
 	{
-		console.log(error)
-	});
-}
-
-
-async function GetAllMessagesAsync(channel, limit = 500)
-{
-	const sum_messages = [];
-	let last_id;
-
-	while (true)
-	{
-		const options = { limit: 100 };
-		if (last_id)
-		{
-			options.before = last_id;
-		}
-
-		const messages = await channel.messages.fetch(options);
-		sum_messages.push(...await resolveArray(messages));
-		last_id = messages.last().id;
-
-		if (messages.size != 100 || sum_messages >= limit)
-		{
-			break;
-		}
+		let layers = { hiddenLayers: [2, 2, 2] }
+		let learningRate = { learningRate: 0.01 }
+		let decayRate = { decayRate: 0.999 }
+		return { ...layers, ...learningRate, ...decayRate }
 	}
-	return await Promise.all(sum_messages);
+
+	static trainML(dados)
+	{
+	
+		function runML()
+		{
+			net.train(dados, { log: false })
+		}
+	
+		const net = new brain.NeuralNetwork(this.GetBrainJsConfig())
+		const mensagemTeste = Mensagem.EncodeStringToAscii("coxinha viado")
+		runML()
+	
+		redeTreinada = net.toFunction();
+	
+		console.log(redeTreinada(mensagemTeste))
+	
+	}
 }
 
-
-function EncodeStringToAscii(valor)
+class Usuario
 {
-	return valor.charCodeAt(0) / 256;
-}
-
-
-
-function resolveArray(mensagens)
-{
-
-	async function GetUser(msg)
+	static async GetUser(msg)
 	{
 
 		function TratarUsuarioNome(valor)
@@ -87,26 +68,100 @@ function resolveArray(mensagens)
 		}
 
 		var usuario = await client.users.fetch(msg.toJSON().authorId.toString());
-		return TratarUsuarioNome(usuario.username)
+		return this.EncodeStringToAscii(usuario.username)
 	}
 
-	function GetMsgContent(msg)
+	static EncodeStringToAscii(valor)
+	{
+		var numero = valor.split('').map(letra => letra.charCodeAt(0)).toString()
+		return numero;
+	}
+
+	static DecodeAsciiToString(asciiNumber)
+	{
+		var decodedText = asciiNumber.split(",").map(item =>
+		{
+			return String.fromCharCode(parseInt(item))
+		})
+		return decodedText
+	}
+}
+
+class Mensagem
+{
+	static EncodeStringToAscii(valor)
+	{
+		return valor.charCodeAt(0);
+	}
+
+	static GetMsgContent(msg, encode = true)
 	{
 		var valor = msg.toJSON().content
-		valor = EncodeStringToAscii(valor)
+		if (encode)
+		{
+			valor = this.EncodeStringToAscii(valor)
+		}
 		return valor
 	}
 
-	return new Promise((resolve, reject) =>
+	static async GetAllMessagesOfAChannelAsync(channel, limit = 500)
 	{
-		var mensagensFormatada = mensagens.map(async msg =>
+		const sum_messages = [];
+		let last_id;
+
+		while (true)
 		{
-			return {
-				input: GetMsgContent(msg),
-				output: await GetUser(msg)
+			const options = { limit: 100 };
+			if (last_id)
+			{
+				options.before = last_id;
 			}
+
+			const messages = await channel.messages.fetch(options);
+			sum_messages.push(...await Geral.organizarArray(messages));
+			last_id = messages.last().id;
+
+			if (messages.size != 100 || sum_messages >= limit)
+			{
+				break;
+			}
+		}
+		return await Promise.all(sum_messages);
+	}
+}
+
+class Geral
+{
+	static async ReadJson()
+	{
+		let rawdata = fs.readFileSync(fileName);
+		var parsed = await JSON.parse(rawdata)
+		return parsed;
+	}
+
+	static async SaveToJson(array)
+	{
+		var json = JSON.stringify(array)
+		fs.writeFile(fileName, json, 'utf8', (error) =>
+		{
+			console.log(error)
+		});
+	}
+	static organizarArray(mensagens)
+	{
+
+		return new Promise((resolve, reject) =>
+		{
+			var mensagensFormatada = mensagens.map(async msg =>
+			{
+				var usuario = await Usuario.GetUser(msg);
+				return {
+					input: Mensagem.GetMsgContent(msg),
+					output: { [`${ usuario }`]: 1 }
+				}
+			})
+			resolve(mensagensFormatada)
 		})
-		resolve(mensagensFormatada)
-	})
+	}
 }
 
