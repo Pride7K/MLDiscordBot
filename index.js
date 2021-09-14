@@ -1,6 +1,7 @@
 const { Client, Intents } = require("discord.js");
 const fs = require('fs');
 const brain = require("brain.js")
+const crypto = require("decode-encode-binary")
 require('dotenv').config()
 
 const botToken = process.env.BOT_TOKEN
@@ -16,16 +17,17 @@ client.once('ready', async () =>
 {
 	console.log('Ready!');
 	var allMessages = await Mensagem.GetAllMessagesOfAChannelAsync(client.channels.cache.get(channelID))
-	console.log(allMessages)
 	BrainJs.trainML(allMessages)
 });
 
 
-class BrainJs{
+
+class BrainJs
+{
 
 	static GetBrainJsConfig()
 	{
-		let layers = { hiddenLayers: [2, 2, 2] }
+		let layers = { hiddenLayers: [20] }
 		let learningRate = { learningRate: 0.01 }
 		let decayRate = { decayRate: 0.999 }
 		return { ...layers, ...learningRate, ...decayRate }
@@ -33,20 +35,20 @@ class BrainJs{
 
 	static trainML(dados)
 	{
-	
+
 		function runML()
 		{
 			net.train(dados, { log: false })
+			redeTreinada = net.toFunction();
 		}
-	
+
 		const net = new brain.NeuralNetwork(this.GetBrainJsConfig())
-		const mensagemTeste = Mensagem.EncodeStringToAscii("coxinha viado")
+		const mensagem = "teste"
+		const mensagemEncoded = crypto.encode(mensagem)
 		runML()
-	
-		redeTreinada = net.toFunction();
-	
-		console.log(redeTreinada(mensagemTeste))
-	
+		var resultado = redeTreinada(mensagemEncoded)
+		console.log(resultado)
+
 	}
 }
 
@@ -68,7 +70,7 @@ class Usuario
 		}
 
 		var usuario = await client.users.fetch(msg.toJSON().authorId.toString());
-		return this.EncodeStringToAscii(usuario.username)
+		return usuario.username
 	}
 
 	static EncodeStringToAscii(valor)
@@ -99,7 +101,13 @@ class Mensagem
 		var valor = msg.toJSON().content
 		if (encode)
 		{
-			valor = this.EncodeStringToAscii(valor)
+			try
+			{
+				valor = crypto.encode(valor)
+			}
+			catch
+			{
+			}
 		}
 		return valor
 	}
@@ -132,6 +140,21 @@ class Mensagem
 
 class Geral
 {
+    static RegerarMensagens(array)
+	{
+		var novoArray = []
+		array.forEach(mensagem=>{
+			try
+			{
+				novoArray.push(mensagem.split(' ').reverse().join(' '));
+			}
+			catch
+			{
+
+			}
+		})
+		array.push(...novoArray)
+	}
 	static async ReadJson()
 	{
 		let rawdata = fs.readFileSync(fileName);
