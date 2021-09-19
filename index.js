@@ -8,47 +8,105 @@ const botToken = process.env.BOT_TOKEN
 const channelID = process.env.CHANNEL_ID
 const fileName = "myjsonfile.json"
 var redeTreinada;
+const prefix = "!";
+var isTraining = false;
 
-const client = new Client({ intents: [Intents.FLAGS.GUILDS] });
+const client = new Client({ intents: [Intents.FLAGS.GUILDS, Intents.FLAGS.GUILD_MESSAGES] });
 client.login(botToken);
 
 
 client.once('ready', async () =>
 {
 	console.log('Ready!');
-	var allMessages = await Mensagem.GetAllMessagesOfAChannelAsync(client.channels.cache.get(channelID))
-	BrainJs.trainML(allMessages)
 });
 
+
+client.on("messageCreate", function (message)
+{
+	if (message.author.bot) return;
+	if (!message.content.startsWith(prefix)) return;
+	if (message.content.startsWith(prefix))
+	{
+		if (message.content.split(" ").length == 1)
+		{
+			return;
+		}
+		if (!BrainJs.isTraining())
+		{
+			var messageToTrainBrainJs = message.content.split(" ").slice(1, message.content.split(" ").length).join(" ");
+			var channelIdToSearch = message.channelId;
+			BrainJs.trainML(messageToTrainBrainJs, channelIdToSearch)
+		}
+		else
+		{
+			message.reply("Please await. I'm still training!")
+		}
+	}
+});
 
 
 class BrainJs
 {
 
-	static GetBrainJsConfig()
+	static isTraining()
 	{
-		let layers = { hiddenLayers: [20] }
-		let learningRate = { learningRate: 0.01 }
-		let decayRate = { decayRate: 0.999 }
-		return { ...layers, ...learningRate, ...decayRate }
+		return isTraining
 	}
 
-	static trainML(dados)
+	static setIsTraining()
 	{
+		isTraining = true;
+	}
 
-		function runML()
+	static setIsNotTraining()
+	{
+		isTraining = false;
+	}
+
+	static GetBrainJsConfig()
+	{
+		let layers = { hiddenLayers: [3] }
+		let learningRate = { learningRate: 0.01 }
+		return { ...layers, ...learningRate }
+	}
+
+	static async trainML(messageToSearch, channelIdToSearch)
+	{
+		this.setIsTraining();
+		try
 		{
-			net.train(dados, { log: false })
-			redeTreinada = net.toFunction();
+			var dados = []
+			if (channelIdToSearch)
+			{
+				dados = await Mensagem.GetAllMessagesOfAChannelAsync(client.channels.cache.get(channelIdToSearch))
+			}
+			else
+			{
+				dados = await Mensagem.GetAllMessagesOfAChannelAsync(client.channels.cache.get(channelID))
+			}
+			function runML()
+			{
+				net.train(dados, { log: false })
+				redeTreinada = net.toFunction();
+			}
+
+			const net = new brain.NeuralNetwork(this.GetBrainJsConfig())
+			const mensagemEncoded = Mensagem.EncodeStringToAscii(messageToSearch)
+			console.log(mensagemEncoded)
+			
+			runML()
+			
+			var resultado = redeTreinada(mensagemEncoded)
+			resultadoAjustado = Mensagem.SortResult(resultado);
+
+			console.log(`Mensagem: ${ mensagem }`)
+			console.log(resultadoAjustado.map(item => { return { user: item.user, probabilidade: `${ item.probabilidade }%` } }))
 		}
+		catch
+		{
 
-		const net = new brain.NeuralNetwork(this.GetBrainJsConfig())
-		const mensagem = "teste"
-		const mensagemEncoded = crypto.encode(mensagem)
-		runML()
-		var resultado = redeTreinada(mensagemEncoded)
-		console.log(resultado)
-
+		}
+		this.setIsNotTraining();
 	}
 }
 
@@ -91,28 +149,34 @@ class Usuario
 
 class Mensagem
 {
-	static EncodeStringToAscii(valor)
+	static SortResult(objetoResultado)
 	{
-		return valor.charCodeAt(0);
+		var resultadoAjustado = Object.entries(objetoResultado).map(i => { return { user: i[0], probabilidade: parseInt(i[1] * 100) } });
+
+		function compareProbabilidade(a, b)
+		{
+			if (a.probabilidade === b.probabilidade)
+				return 0;
+	
+			return a.probabilidade > b.probabilidade ? -1 : 1;
+		}
+
+		return resultadoAjustado.sort(compareProbabilidade)
 	}
 
-	static GetMsgContent(msg, encode = true)
+	static EncodeStringToAscii(valor)
+	{
+		return valor.split('').map(letter => letter.charCodeAt(0)).reduce((item, acc) => item + acc, 0);
+	}
+
+	static GetMsgContent(msg)
 	{
 		var valor = msg.toJSON().content
-		if (encode)
-		{
-			try
-			{
-				valor = crypto.encode(valor)
-			}
-			catch
-			{
-			}
-		}
+		valor = this.EncodeStringToAscii(valor)
 		return valor
 	}
 
-	static async GetAllMessagesOfAChannelAsync(channel, limit = 500)
+	static async GetAllMessagesOfAChannelAsync(channel, limit = 1000)
 	{
 		const sum_messages = [];
 		let last_id;
@@ -128,8 +192,7 @@ class Mensagem
 			const messages = await channel.messages.fetch(options);
 			sum_messages.push(...await Geral.organizarArray(messages));
 			last_id = messages.last().id;
-
-			if (messages.size != 100 || sum_messages >= limit)
+			if (messages.size != 100 || sum_messages.length >= limit)
 			{
 				break;
 			}
@@ -140,10 +203,12 @@ class Mensagem
 
 class Geral
 {
-    static RegerarMensagens(array)
+
+	static RegerarMensagens(array)
 	{
 		var novoArray = []
-		array.forEach(mensagem=>{
+		array.forEach(mensagem =>
+		{
 			try
 			{
 				novoArray.push(mensagem.split(' ').reverse().join(' '));
@@ -175,11 +240,12 @@ class Geral
 
 		return new Promise((resolve, reject) =>
 		{
-			var mensagensFormatada = mensagens.map(async msg =>
+			var mensagensFormatada = mensagens.filter(msg => !msg.toJSON().content.startsWith("!train")).map(async msg =>
 			{
 				var usuario = await Usuario.GetUser(msg);
+				var mensagem = Mensagem.GetMsgContent(msg);
 				return {
-					input: Mensagem.GetMsgContent(msg),
+					input: mensagem,
 					output: { [`${ usuario }`]: 1 }
 				}
 			})
