@@ -9,6 +9,8 @@ const channelID = process.env.CHANNEL_ID
 const fileName = "myjsonfile.json"
 var redeTreinada;
 const prefix = "!";
+const setOptions = "--options"
+const limitOption = "--limit"
 var isTraining = false;
 
 const client = new Client({ intents: [Intents.FLAGS.GUILDS, Intents.FLAGS.GUILD_MESSAGES] });
@@ -65,47 +67,35 @@ class BrainJs
 
 	static GetBrainJsConfig()
 	{
-		let layers = { hiddenLayers: [3] }
 		let learningRate = { learningRate: 0.01 }
-		return { ...layers, ...learningRate }
+		let hiddenLayers = {hiddenLayers:[20,20]}
+		return { ...learningRate,...hiddenLayers}
 	}
 
 	static async trainML(messageToSearch, channelIdToSearch)
 	{
 		this.setIsTraining();
-		try
+
+		var dados = []
+
+		var channelIdChoosed = channelIdToSearch ?? channelID
+		dados = await Mensagem.GetAllMessagesOfAChannelAsync(client.channels.cache.get(channelIdChoosed))
+
+		function runML()
 		{
-			var dados = []
-			if (channelIdToSearch)
-			{
-				dados = await Mensagem.GetAllMessagesOfAChannelAsync(client.channels.cache.get(channelIdToSearch))
-			}
-			else
-			{
-				dados = await Mensagem.GetAllMessagesOfAChannelAsync(client.channels.cache.get(channelID))
-			}
-			function runML()
-			{
-				net.train(dados, { log: false })
-				redeTreinada = net.toFunction();
-			}
-
-			const net = new brain.NeuralNetwork(this.GetBrainJsConfig())
-			const mensagemEncoded = Mensagem.EncodeStringToAscii(messageToSearch)
-			console.log(mensagemEncoded)
-			
-			runML()
-			
-			var resultado = redeTreinada(mensagemEncoded)
-			resultadoAjustado = Mensagem.SortResult(resultado);
-
-			console.log(`Mensagem: ${ mensagem }`)
-			console.log(resultadoAjustado.map(item => { return { user: item.user, probabilidade: `${ item.probabilidade }%` } }))
+			net.train(dados, { log: true })
+			redeTreinada = net.toFunction();
 		}
-		catch
-		{
 
-		}
+		const net = new brain.NeuralNetwork(this.GetBrainJsConfig())
+		const mensagemEncoded = Mensagem.EncodeStringToAscii(messageToSearch)
+
+		runML()
+
+		var resultado = redeTreinada(mensagemEncoded)
+		var resultadoAjustado = Mensagem.SortResult(resultado);
+		Mensagem.SendResultMessage(resultadoAjustado,channelIdChoosed);
+
 		this.setIsNotTraining();
 	}
 }
@@ -149,24 +139,37 @@ class Usuario
 
 class Mensagem
 {
+	static SendResultMessage(resultado, channelId)
+	{
+		client.channels.fetch(channelId).then(channel =>
+		{
+			var objeto = resultado.shift()
+			channel.send(`O usuário mais provavel de ter enviado essa mensagem é ${ objeto.user } com ${ objeto.probabilidade }`);
+		});
+	}
 	static SortResult(objetoResultado)
 	{
 		var resultadoAjustado = Object.entries(objetoResultado).map(i => { return { user: i[0], probabilidade: parseInt(i[1] * 100) } });
-
 		function compareProbabilidade(a, b)
 		{
 			if (a.probabilidade === b.probabilidade)
 				return 0;
-	
+
 			return a.probabilidade > b.probabilidade ? -1 : 1;
 		}
-
-		return resultadoAjustado.sort(compareProbabilidade)
+		resultadoAjustado = resultadoAjustado.sort(compareProbabilidade)
+		resultadoAjustado = resultadoAjustado.map(item => { return { user: item.user, probabilidade: `${ item.probabilidade }%` } })
+		return resultadoAjustado
 	}
 
 	static EncodeStringToAscii(valor)
 	{
-		return valor.split('').map(letter => letter.charCodeAt(0)).reduce((item, acc) => item + acc, 0);
+		var valorSplited = valor.split('')
+		if(valorSplited.length > 50)
+		{
+			valorSplited = valorSplited.slice(0,50)
+		}
+		return valorSplited.map(letter => letter.charCodeAt(0) / 256);
 	}
 
 	static GetMsgContent(msg)
@@ -176,7 +179,7 @@ class Mensagem
 		return valor
 	}
 
-	static async GetAllMessagesOfAChannelAsync(channel, limit = 1000)
+	static async GetAllMessagesOfAChannelAsync(channel, limit = 100)
 	{
 		const sum_messages = [];
 		let last_id;
@@ -197,7 +200,8 @@ class Mensagem
 				break;
 			}
 		}
-		return await Promise.all(sum_messages);
+		var AllMessages = await Geral.FillEmptyPlaces(await Promise.all(sum_messages));
+		return AllMessages;
 	}
 }
 
@@ -250,6 +254,37 @@ class Geral
 				}
 			})
 			resolve(mensagensFormatada)
+		})
+	}
+
+	// esse método serve para um problema que o brainjs apresenta.
+	// quando se é treinado com um texto hipergigantesco o resultado será NaN
+	static FillEmptyPlaces(array)
+	{
+		return new Promise((resolve, reject) =>
+		{
+			var biggestLengthArray = array.map(a => a.input.length)
+				.indexOf(Math.max(...array.map(a => a.input.length)));
+
+			var newArray = []
+
+			array.forEach((item, index) =>
+			{
+				if (index != biggestLengthArray)
+				{
+					if (item.input.length < array[biggestLengthArray].input.length)
+					{
+						while (item.input.length < array[biggestLengthArray].input.length)
+						{
+							item.input.push(0);
+						}
+					}
+				}
+				newArray.push(...[item])
+			})
+
+			array = [...newArray];
+			resolve(array = [...newArray])
 		})
 	}
 }
