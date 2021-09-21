@@ -144,7 +144,7 @@ class Mensagem
 		client.channels.fetch(channelId).then(channel =>
 		{
 			var objeto = resultado.shift()
-			channel.send(`O usuário mais provavel de ter enviado essa mensagem é ${ objeto.user } com ${ objeto.probabilidade }`);
+			channel.send(`O usuário mais provavel de ter enviado essa mensagem é ${ objeto.user } com ${ objeto.probabilidade } de certeza`);
 		});
 	}
 	static SortResult(objetoResultado)
